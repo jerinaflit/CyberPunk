@@ -1,2 +1,0 @@
-# CyberPunk
-Plateforme de TEST

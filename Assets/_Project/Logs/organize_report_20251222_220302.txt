@@ -1,0 +1,16 @@
+ProjectOrganizer Report
+Mode: EXECUTE
+Date: 2025-12-22 22:03:02
+
+Planned moves: 4
+MOVE: Assets/Art/Hotspots/rue_hot.png -> Assets/_Project/Art/Masks/Hotspots/rue_hot.png
+MOVE: Assets/Scenes/Main.unity -> Assets/_Project/Scenes/Main.unity
+MOVE: Assets/Scenes/SampleScene.unity -> Assets/_Project/Scenes/SampleScene.unity
+MOVE: Assets/BootHotspotDemo.cs -> Assets/_Project/Scripts/Runtime/BootHotspotDemo.cs
+
+Skipped: 5
+SKIP: Assets/Render/URP2D_Renderer.asset  (skip .asset)
+SKIP: Assets/UniversalRenderPipelineGlobalSettings.asset  (skip .asset)
+SKIP: Assets/InputSystem_Actions.inputactions  (no rule)
+SKIP: Assets/Render/URP2D.asset  (skip .asset)
+SKIP: Assets/DefaultVolumeProfile.asset  (skip .asset)

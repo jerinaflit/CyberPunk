@@ -1,5 +1,5 @@
 fileFormatVersion: 2
-guid: b40a594289500e047b1647bdbf065879
+guid: 0fb5c4cd95c986e49a2a67bf793acbb8
 TextureImporter:
   internalIDToNameTable:
   - first:
@@ -46,7 +46,7 @@ TextureImporter:
   nPOTScale: 0
   lightmap: 0
   compressionQuality: 50
-  spriteMode: 1
+  spriteMode: 2
   spriteExtrude: 1
   spriteMeshType: 1
   alignment: 0
@@ -72,7 +72,7 @@ TextureImporter:
   platformSettings:
   - serializedVersion: 4
     buildTarget: DefaultTexturePlatform
-    maxTextureSize: 4096
+    maxTextureSize: 2048
     resizeAlgorithm: 0
     textureFormat: -1
     textureCompression: 0
@@ -129,10 +129,10 @@ TextureImporter:
       name: char_hero1_idle2_014_0
       rect:
         serializedVersion: 2
-        x: 59
-        y: 38
-        width: 1158
-        height: 652
+        x: 9
+        y: 0
+        width: 212
+        height: 496
       alignment: 0
       pivot: {x: 0, y: 0}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -151,7 +151,7 @@ TextureImporter:
     customData: 
     physicsShape: []
     bones: []
-    spriteID: 5e97eb03825dee720800000000000000
+    spriteID: 
     internalID: 0
     vertices: []
     indices: 
@@ -160,7 +160,8 @@ TextureImporter:
     secondaryTextures: []
     spriteCustomMetadata:
       entries: []
-    nameFileIdTable: {}
+    nameFileIdTable:
+      char_hero1_idle2_014_0: 6847587841541985801
   mipmapLimitGroupName: 
   pSDRemoveMatte: 0
   userData: 

@@ -15,6 +15,6 @@ MonoBehaviour:
   spriteRootFolders:
   - Assets/_Project/Art/Characters
   outputRootFolder: Assets/_Project/Animations/Characters
-  defaultFrameRate: 12
+  defaultFrameRate: 200
   loopAllClips: 1
   animIdInt: AnimId

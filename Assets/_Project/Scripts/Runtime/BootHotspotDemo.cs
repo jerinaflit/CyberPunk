@@ -2,44 +2,49 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using CyberPunk.Core;
+using CyberPunk.Hero;
 
 public class BootHotspotDemo : MonoBehaviour
 {
-    public Texture2D maskImage; // <-- glisse rue_hot.png ici dans l'Inspector
+    [Header("Configuration")]
+    // Walk mask: where the hero is allowed to move (alpha > 0)
+    public Texture2D walkMaskImage; // <-- glisse rue_mask.png ici
+    // Hotspot mask: colored zones for interactions (alpha > 0 + color mapping)
+    public Texture2D hotspotMaskImage; // <-- glisse rue_hot.png ici
 
-    const int PPU = 100;
+    // Backward-compat: if you already assigned only one texture, we treat it as the hotspot mask.
+    [HideInInspector] public Texture2D maskImage;
+    public HotspotDatabase hotspotDatabase;
+    public SimpleHeroController hero; // Reference to the hero
 
-    bool _inited;
+    [Header("Runtime Debug")]
+    [SerializeField] private string _uiText = "Assigne Mask Image & Database puis Play.";
 
-    SpriteRenderer _bgRenderer;
-    Texture2D _mask;
+    private const int PPU = 100;
+    private bool _inited;
+    private SpriteRenderer _bgRenderer;
+    private Texture2D _walkMask;
+    private Texture2D _hotspotMask;
 
-    string _uiText = "Assigne Mask Image (rue_hot.png) puis Play.";
+    // Actions (still hardcoded for demo purposes, but could be event-based)
+    private Dictionary<string, Action> _onClick;
 
-    Dictionary<Color32, string> _colorToId;
-    Dictionary<string, Action> _onClick;
+    private void Awake() => InitOnce();
+    private void Start() => InitOnce();
 
-    void Awake() => InitOnce();
-    void Start() => InitOnce();
-
-    void InitOnce()
+    private void InitOnce()
     {
         if (_inited) return;
         _inited = true;
 
         Application.targetFrameRate = 60;
-
         EnsureMainCamera();
 
-        // Mapping couleurs -> HotspotId (mets tes vraies couleurs ici si besoin)
-        _colorToId = new Dictionary<Color32, string>
-        {
-            { new Color32(255, 0,   0,   255), "BAR_DOOR" },
-            { new Color32(0,   200, 200, 255), "ATM" },
-            { new Color32(0,   0,   255, 255), "ROBOT" },
-        };
+        // Find Hero if not assigned
+        if (hero == null) hero = FindFirstObjectByType<SimpleHeroController>();
 
-        // Actions test
+        // Initialize Actions
         _onClick = new Dictionary<string, Action>
         {
             { "BAR_DOOR", () => Say("La porte du bar est verrouillée...") },
@@ -47,42 +52,44 @@ public class BootHotspotDemo : MonoBehaviour
             { "ROBOT",    () => Say("Le robot t’observe en silence.") },
         };
 
-        // Si l'image n'est pas assignée, on stoppe proprement (pas d'erreurs infinies)
-        if (maskImage == null)
+        // Backward-compat bridge
+        if (hotspotMaskImage == null && maskImage != null)
+            hotspotMaskImage = maskImage;
+
+        if (walkMaskImage == null)
+            walkMaskImage = hotspotMaskImage; // fallback (not ideal, but prevents "no movement")
+
+        if (walkMaskImage == null)
         {
-            Say("⚠️ Assigne 'Mask Image' (rue_hot.png) sur BootHotspotDemo.");
+            Say("⚠️ Assigne 'Walk Mask Image' (rue_mask.png) sur BootHotspotDemo.");
             return;
         }
 
-        // Clone lisible du mask (important: lire les pixels via _mask)
-        _mask = new Texture2D(maskImage.width, maskImage.height, TextureFormat.RGBA32, false);
-        _mask.SetPixels(maskImage.GetPixels());
-        _mask.Apply();
-        _mask.filterMode = FilterMode.Point;
+        _walkMask = TryGetReadableTexture(walkMaskImage, "WalkMask");
+        if (_walkMask == null) return;
 
-        // Fond neutre à la taille du mask (juste pour avoir une surface)
-        var bg = NewTex(_mask.width, _mask.height, new Color32(30, 30, 34, 255));
+        _hotspotMask = hotspotMaskImage != null ? TryGetReadableTexture(hotspotMaskImage, "HotspotMask") : null;
+
+        // Create Background
+        var bg = NewTex(_walkMask.width, _walkMask.height, new Color32(30, 30, 34, 255));
         _bgRenderer = CreateSpriteGO("Background", bg, sortingOrder: 0);
 
-        // Overlay du mask (semi-transparent) pour debug visuel
-        var maskVis = TextureToSprite(_mask, PPU);
+        // Create Debug Overlay
+        var maskVis = TextureToSprite(_walkMask, PPU);
         var go = new GameObject("MaskDebug");
         var sr = go.AddComponent<SpriteRenderer>();
         sr.sprite = maskVis;
         sr.sortingOrder = 1;
         sr.color = new Color(1, 1, 1, 0.20f);
 
-        Say($"Mask chargé: {_mask.width}x{_mask.height}. Clique sur une zone colorée.");
+        Say($"WalkMask chargé: {_walkMask.width}x{_walkMask.height}. Clique pour bouger.");
     }
 
-    void Update()
+    private void Update()
     {
-        // Si pas de mask assigné, on ne fait rien
-        if (maskImage == null || _mask == null || _bgRenderer == null || _colorToId == null)
-            return;
+        if (_walkMask == null || _bgRenderer == null) return;
 
-        if (Mouse.current == null) return;
-        if (!Mouse.current.leftButton.wasPressedThisFrame) return;
+        if (Mouse.current == null || !Mouse.current.leftButton.wasPressedThisFrame) return;
 
         Vector2 screenPos = Mouse.current.position.ReadValue();
 
@@ -92,25 +99,81 @@ public class BootHotspotDemo : MonoBehaviour
             return;
         }
 
-        Color32 c = (Color32)_mask.GetPixel(px, py);
+        Color32 walk = (Color32)_walkMask.GetPixel(px, py);
+
+        // Move Hero if click is on valid WALK mask area (alpha > 0)
+        if (walk.a > 0 && hero != null)
+        {
+            Vector2 worldPos = PixelToWorld(px, py);
+            hero.MoveTo(worldPos);
+        }
+
+        // Hotspot interaction (optional)
+        if (_hotspotMask == null) return;
+
+        Color32 c = (Color32)_hotspotMask.GetPixel(px, py);
 
         if (c.a == 0)
         {
-            Say("Rien ici.");
             return;
         }
 
-        if (!_colorToId.TryGetValue(c, out var id))
+        string id = hotspotDatabase != null ? hotspotDatabase.GetIdFromColor(c) : null;
+
+        // Fallback if no database or not found (for backward compatibility or testing)
+        if (string.IsNullOrEmpty(id))
         {
-            Say($"Couleur inconnue: {c.r},{c.g},{c.b}");
+             // Try hardcoded fallback if database is missing
+             if (hotspotDatabase == null)
+             {
+                 // Simple fallback for demo
+                 if (c.r == 255 && c.g == 0) id = "BAR_DOOR";
+                 else if (c.g == 200) id = "ATM";
+                 else if (c.b == 255) id = "ROBOT";
+             }
+        }
+
+        if (string.IsNullOrEmpty(id))
+        {
+            // Just walking, no hotspot
             return;
         }
 
         Debug.Log($"[HOTSPOT] {id} @ ({px},{py})");
+        
+        // Use the new Event Bus architecture
+        GameEvents.TriggerHotspotClicked(id);
+        
+        // Keep local handling for demo text feedback
         HandleHotspotClick(id);
     }
 
-    void HandleHotspotClick(string id)
+    private Texture2D TryGetReadableTexture(Texture2D source, string label)
+    {
+        if (source == null) return null;
+        try
+        {
+            if (source.isReadable)
+            {
+                source.filterMode = FilterMode.Point;
+                return source;
+            }
+
+            Debug.LogWarning($"{label} is not readable. Cloning texture (slower startup). Enable 'Read/Write' in Import Settings to optimize.");
+            var clone = new Texture2D(source.width, source.height, TextureFormat.RGBA32, false);
+            clone.SetPixels(source.GetPixels());
+            clone.Apply();
+            clone.filterMode = FilterMode.Point;
+            return clone;
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[BootHotspotDemo] Failed to read {label} pixels: {e.Message}. Make sure 'Read/Write Enabled' is checked for '{source.name}'.");
+            return null;
+        }
+    }
+
+    private void HandleHotspotClick(string id)
     {
         if (_onClick != null && _onClick.TryGetValue(id, out var action))
             action.Invoke();
@@ -118,13 +181,13 @@ public class BootHotspotDemo : MonoBehaviour
             Say($"Hotspot détecté: {id} (pas encore d’action)");
     }
 
-    void Say(string text)
+    private void Say(string text)
     {
         _uiText = text;
         Debug.Log("[SAY] " + text);
     }
 
-    void OnGUI()
+    private void OnGUI()
     {
         GUI.Label(new Rect(12, 12, 1400, 40), _uiText);
         GUI.Label(new Rect(12, 32, 1400, 40), "Astuce: l’overlay 'MaskDebug' montre les zones cliquables.");
@@ -132,10 +195,9 @@ public class BootHotspotDemo : MonoBehaviour
 
     // ---------------- Helpers ----------------
 
-    void EnsureMainCamera()
+    private void EnsureMainCamera()
     {
         if (Camera.main != null) return;
-
         var camGO = new GameObject("Main Camera");
         camGO.tag = "MainCamera";
         var cam = camGO.AddComponent<Camera>();
@@ -143,7 +205,7 @@ public class BootHotspotDemo : MonoBehaviour
         cam.transform.position = new Vector3(0, 0, -10);
     }
 
-    Texture2D NewTex(int w, int h, Color32 fill)
+    private Texture2D NewTex(int w, int h, Color32 fill)
     {
         var t = new Texture2D(w, h, TextureFormat.RGBA32, false);
         var pixels = new Color32[w * h];
@@ -154,7 +216,7 @@ public class BootHotspotDemo : MonoBehaviour
         return t;
     }
 
-    SpriteRenderer CreateSpriteGO(string name, Texture2D tex, int sortingOrder)
+    private SpriteRenderer CreateSpriteGO(string name, Texture2D tex, int sortingOrder)
     {
         var go = new GameObject(name);
         var sr = go.AddComponent<SpriteRenderer>();
@@ -168,20 +230,18 @@ public class BootHotspotDemo : MonoBehaviour
             cam.orthographicSize = (tex.height / (float)PPU) * 0.5f;
             cam.transform.position = new Vector3(0, 0, -10);
         }
-
         return sr;
     }
 
-    Sprite TextureToSprite(Texture2D tex, int ppu)
+    private Sprite TextureToSprite(Texture2D tex, int ppu)
     {
         return Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f), ppu);
     }
 
-    bool TryScreenToPixel(Vector2 screen, out int px, out int py)
+    private bool TryScreenToPixel(Vector2 screen, out int px, out int py)
     {
         px = py = 0;
-
-        if (_bgRenderer == null || _mask == null) return false;
+        if (_bgRenderer == null || _walkMask == null) return false;
 
         var cam = Camera.main;
         if (cam == null) return false;
@@ -189,15 +249,22 @@ public class BootHotspotDemo : MonoBehaviour
         Vector3 world = cam.ScreenToWorldPoint(new Vector3(screen.x, screen.y, 0f));
         Vector3 local = _bgRenderer.transform.InverseTransformPoint(world);
 
-        var sprite = _bgRenderer.sprite;
+        // Assuming sprite is centered
+        float localX = local.x * PPU + (_walkMask.width / 2f);
+        float localY = local.y * PPU + (_walkMask.height / 2f);
 
-        float halfW = sprite.rect.width * 0.5f;
-        float halfH = sprite.rect.height * 0.5f;
+        px = Mathf.FloorToInt(localX);
+        py = Mathf.FloorToInt(localY);
 
-        px = Mathf.FloorToInt(local.x * PPU + halfW);
-        py = Mathf.FloorToInt(local.y * PPU + halfH);
+        return (px >= 0 && px < _walkMask.width && py >= 0 && py < _walkMask.height);
+    }
 
-        // ✅ CORRECTION ICI : on compare à la taille du mask
-        return (px >= 0 && px < _mask.width && py >= 0 && py < _mask.height);
+    private Vector2 PixelToWorld(int px, int py)
+    {
+        // Convert mask pixel -> local units -> world
+        float localX = (px - (_walkMask.width / 2f)) / PPU;
+        float localY = (py - (_walkMask.height / 2f)) / PPU;
+        Vector3 local = new Vector3(localX, localY, 0f);
+        return _bgRenderer.transform.TransformPoint(local);
     }
 }

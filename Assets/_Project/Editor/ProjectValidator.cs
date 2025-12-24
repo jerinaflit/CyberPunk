@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
@@ -9,7 +10,7 @@ using UnityEngine;
 public static class ProjectValidator
 {
     private const string ROOT = "Assets/_Project";
-    private const string CHARACTERS_ROOT = "Assets/_Project/Art/Characters";
+    private const string ANIM_OUT = "Assets/_Project/Animations/Characters";
 
     // =========================
     // MENUS
@@ -45,11 +46,7 @@ public static class ProjectValidator
             return;
         }
 
-        // Auto-fix textures: simplest + most robust = reimport all textures under _Project.
-        // ImportRules.cs will apply correct settings.
         int texturesFixed = AutoFixTextures();
-
-        // Auto-fix controllers: fill missing Motions deterministically (no lambdas)
         int controllersFixed = AutoFixControllers(out int statesFixed, out int controllersScanned);
 
         var issues = new List<string>();
@@ -95,7 +92,7 @@ public static class ProjectValidator
                 Require(issues, path, importer.filterMode == FilterMode.Point, "Mask must use Point filter");
                 Require(issues, path, !importer.mipmapEnabled, "Mask must have mipmaps OFF");
             }
-            else if (p.Contains("/_project/art/") || p.Contains("/_project/ui/"))
+            else if (p.Contains("/_project/art/") || p.Contains("/_project/ui/") || p.Contains("/_project/vfx/"))
             {
                 Require(issues, path, importer.textureType == TextureImporterType.Sprite, "Sprite must be TextureType Sprite");
                 Require(issues, path, !importer.mipmapEnabled, "Sprite must have mipmaps OFF");
@@ -107,14 +104,12 @@ public static class ProjectValidator
     private static int AutoFixTextures()
     {
         int count = 0;
-
         foreach (string guid in AssetDatabase.FindAssets("t:Texture2D", new[] { ROOT }))
         {
             string path = AssetDatabase.GUIDToAssetPath(guid).Replace("\\", "/");
             AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
             count++;
         }
-
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
         return count;
@@ -134,7 +129,11 @@ public static class ProjectValidator
 
             checkedCount++;
 
-            if (!path.ToLowerInvariant().Contains("/_generated/"))
+            // Validate generated clips from BOTH pipelines:
+            bool isOldGen = path.ToLowerInvariant().Contains("/_generated/");
+            bool isNewGen = path.Replace("\\", "/").StartsWith(ANIM_OUT, StringComparison.OrdinalIgnoreCase);
+
+            if (!isOldGen && !isNewGen)
                 continue;
 
             if (CountSpriteKeys(clip) == 0)
@@ -199,9 +198,12 @@ public static class ProjectValidator
 
             bool changed = false;
 
-            // expected: .../Animations/Characters/Hero1/Hero1.controller
-            string hero = Path.GetFileName(Path.GetDirectoryName(path));
-            string artRoot = $"{CHARACTERS_ROOT}/{hero}".Replace("\\", "/");
+            // If controller is in our new output structure:
+            // Assets/_Project/Animations/Characters/<Character>/<Character>.controller
+            string folder = Path.GetDirectoryName(path)?.Replace("\\", "/") ?? "";
+            string character = Path.GetFileName(folder);
+
+            bool looksNewPipeline = folder.StartsWith(ANIM_OUT, StringComparison.OrdinalIgnoreCase);
 
             foreach (var layer in controller.layers)
             {
@@ -212,14 +214,24 @@ public static class ProjectValidator
                 {
                     if (state.motion != null) continue;
 
-                    var clip = FindClip(artRoot, state.name);
+                    AnimationClip clip = null;
+
+                    if (looksNewPipeline && !string.IsNullOrEmpty(character))
+                    {
+                        // Clip expected: <folder>/<Character>_<StateName>.anim
+                        string safeState = SanitizeFilePart(state.name);
+                        string expected = $"{folder}/{character}_{safeState}.anim".Replace("\\", "/");
+                        clip = AssetDatabase.LoadAssetAtPath<AnimationClip>(expected);
+                        if (clip != null && CountSpriteKeys(clip) == 0) clip = null;
+                    }
+
                     if (clip == null) continue;
 
                     state.motion = clip;
                     statesFixed++;
                     changed = true;
 
-                    Debug.Log($"[AutoFix] {hero} → {state.name} assigned {clip.name}");
+                    Debug.Log($"[AutoFix] {character} → State '{state.name}' assigned '{clip.name}'");
                 }
             }
 
@@ -239,37 +251,25 @@ public static class ProjectValidator
         return controllersFixed;
     }
 
-    private static AnimationClip FindClip(string heroRoot, string state)
+    private static string SanitizeFilePart(string s)
     {
-        if (!AssetDatabase.IsValidFolder(heroRoot)) return null;
-
-        string folder = string.Equals(state, "Walk", StringComparison.OrdinalIgnoreCase) ? "WalkRight" : state;
-        string expected = $"{heroRoot}/{folder}/_Generated/{folder}.anim".Replace("\\", "/");
-
-        var clip = AssetDatabase.LoadAssetAtPath<AnimationClip>(expected);
-        if (clip != null && CountSpriteKeys(clip) > 0)
-            return clip;
-
-        return null;
+        var invalid = Path.GetInvalidFileNameChars();
+        var cleaned = new string((s ?? "").Select(ch => invalid.Contains(ch) ? '_' : ch).ToArray());
+        return cleaned.Replace(' ', '_');
     }
 
-    // Collect all AnimatorState objects under a state machine (including sub-state machines)
     private static List<AnimatorState> CollectStates(AnimatorStateMachine sm)
     {
         var result = new List<AnimatorState>();
         if (sm == null) return result;
 
         foreach (var child in sm.states)
-        {
             if (child.state != null)
                 result.Add(child.state);
-        }
 
         foreach (var sub in sm.stateMachines)
-        {
             if (sub.stateMachine != null)
                 result.AddRange(CollectStates(sub.stateMachine));
-        }
 
         return result;
     }
